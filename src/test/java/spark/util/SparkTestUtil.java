@@ -1,27 +1,45 @@
 package spark.util;
 
-import org.apache.http.Header;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.*;
-import org.apache.http.conn.ClientConnectionManager;
-import org.apache.http.conn.scheme.PlainSocketFactory;
-import org.apache.http.conn.scheme.Scheme;
-import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.impl.conn.BasicClientConnectionManager;
-import org.apache.http.util.EntityUtils;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.security.KeyStore;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManagerFactory;
-import java.io.FileInputStream;
-import java.io.UnsupportedEncodingException;
-import java.security.KeyStore;
-import java.util.HashMap;
-import java.util.Map;
+
+import org.apache.http.Header;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.methods.HttpOptions;
+import org.apache.http.client.methods.HttpPatch;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.client.methods.HttpRequestBase;
+import org.apache.http.client.methods.HttpTrace;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.config.Registry;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.conn.socket.ConnectionSocketFactory;
+import org.apache.http.conn.socket.PlainConnectionSocketFactory;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultRedirectStrategy;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.conn.BasicHttpClientConnectionManager;
+import org.apache.http.protocol.HttpContext;
+import org.apache.http.util.EntityUtils;
 
 public class SparkTestUtil {
 
@@ -31,29 +49,74 @@ public class SparkTestUtil {
 
     public SparkTestUtil(int port) {
         this.port = port;
-        Scheme http = new Scheme("http", port, PlainSocketFactory.getSocketFactory());
-        Scheme https = new Scheme("https", port, new org.apache.http.conn.ssl.SSLSocketFactory(getSslFactory(), null));
-        SchemeRegistry sr = new SchemeRegistry();
-        sr.register(http);
-        sr.register(https);
-        ClientConnectionManager connMrg = new BasicClientConnectionManager(sr);
-        this.httpClient = new DefaultHttpClient(connMrg);
+        this.httpClient = httpClientBuilder().build();
     }
 
-    public UrlResponse doMethodSecure(String requestMethod, String path,
-                                      String body) throws Exception {
-        return doMethod(requestMethod, path, body, true);
+    private HttpClientBuilder httpClientBuilder() {
+        SSLConnectionSocketFactory sslConnectionSocketFactory =
+                new SSLConnectionSocketFactory(getSslFactory(), (paramString, paramSSLSession) -> true);
+        Registry<ConnectionSocketFactory> socketRegistry = RegistryBuilder
+                .<ConnectionSocketFactory>create()
+                .register("http", PlainConnectionSocketFactory.INSTANCE)
+                .register("https", sslConnectionSocketFactory)
+                .build();
+        BasicHttpClientConnectionManager connManager = new BasicHttpClientConnectionManager(socketRegistry);
+        return HttpClientBuilder.create().setConnectionManager(connManager);
     }
 
-    public UrlResponse doMethod(String requestMethod, String path, String body)
+    public void setFollowRedirectStrategy(Integer... codes) {
+        final List<Integer> redirectCodes = Arrays.asList(codes);
+        DefaultRedirectStrategy redirectStrategy = new DefaultRedirectStrategy() {
+            public boolean isRedirected(HttpRequest request, HttpResponse response, HttpContext context) {
+                boolean isRedirect = false;
+                try {
+                    isRedirect = super.isRedirected(request, response, context);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                if (!isRedirect) {
+                    int responseCode = response.getStatusLine().getStatusCode();
+                    if (redirectCodes.contains(responseCode)) {
+                        return true;
+                    }
+                }
+                return isRedirect;
+            }
+        };
+        this.httpClient = httpClientBuilder().setRedirectStrategy(redirectStrategy).build();
+    }
+
+    public UrlResponse get(String path) throws Exception {
+        return doMethod("GET", path, null);
+    }
+
+
+    public UrlResponse doMethodSecure(String requestMethod, String path, String body)
             throws Exception {
-        return doMethod(requestMethod, path, body, false);
+        return doMethod(requestMethod, path, body, true, "text/html");
     }
 
-    private UrlResponse doMethod(String requestMethod, String path,
-                                 String body, boolean secureConnection) throws Exception {
+    public UrlResponse doMethod(String requestMethod, String path, String body) throws Exception {
+        return doMethod(requestMethod, path, body, false, "text/html");
+    }
 
-        HttpUriRequest httpRequest = getHttpRequest(requestMethod, path, body, secureConnection);
+    public UrlResponse doMethodSecure(String requestMethod, String path, String body, String acceptType)
+            throws Exception {
+        return doMethod(requestMethod, path, body, true, acceptType);
+    }
+
+    public UrlResponse doMethod(String requestMethod, String path, String body, String acceptType) throws Exception {
+        return doMethod(requestMethod, path, body, false, acceptType);
+    }
+
+    private UrlResponse doMethod(String requestMethod, String path, String body, boolean secureConnection,
+                                 String acceptType) throws Exception {
+        return doMethod(requestMethod, path, body, secureConnection, acceptType, null);
+    }
+
+    public UrlResponse doMethod(String requestMethod, String path, String body, boolean secureConnection,
+                                String acceptType, Map<String, String> reqHeaders) throws IOException {
+        HttpUriRequest httpRequest = getHttpRequest(requestMethod, path, body, secureConnection, acceptType, reqHeaders);
         HttpResponse httpResponse = httpClient.execute(httpRequest);
 
         UrlResponse urlResponse = new UrlResponse();
@@ -73,41 +136,87 @@ public class SparkTestUtil {
         return urlResponse;
     }
 
-    private HttpUriRequest getHttpRequest(String requestMethod, String path, String body, boolean secureConnection) {
+    private HttpUriRequest getHttpRequest(String requestMethod, String path, String body, boolean secureConnection,
+                                          String acceptType, Map<String, String> reqHeaders) {
         try {
             String protocol = secureConnection ? "https" : "http";
             String uri = protocol + "://localhost:" + port + path;
-            //get, post, put, patch, delete, head, trace, connect, options
-            switch (requestMethod) {
-                case "GET":
-                    return new HttpGet(uri);
-                case "POST":
-                    HttpPost httpPost = new HttpPost(uri);
-                    httpPost.setEntity(new StringEntity(body));
-                    return httpPost;
-                case "PUT":
-                    HttpPut httpPut = new HttpPut(uri);
-                    httpPut.setEntity(new StringEntity(body));
-                    return httpPut;
-                case "PATCH":
-                    HttpPatch httpPatch = new HttpPatch(uri);
-                    httpPatch.setEntity(new StringEntity(body));
-                    return httpPatch;
-                case "DELETE":
-                    return new HttpDelete(uri);
-                case "HEAD":
-                    return new HttpHead(uri);
-                case "TRACE":
-                    return new HttpTrace(uri);
-                case "OPTIONS":
-                    return new HttpOptions(uri);
-                default:
-                    throw new IllegalArgumentException("Unknown method " + requestMethod);
+
+            if (requestMethod.equals("GET")) {
+                HttpGet httpGet = new HttpGet(uri);
+                httpGet.setHeader("Accept", acceptType);
+                addHeaders(reqHeaders, httpGet);
+                return httpGet;
             }
+
+            if (requestMethod.equals("POST")) {
+                HttpPost httpPost = new HttpPost(uri);
+                httpPost.setHeader("Accept", acceptType);
+                addHeaders(reqHeaders, httpPost);
+                httpPost.setEntity(new StringEntity(body));
+                return httpPost;
+            }
+
+            if (requestMethod.equals("PATCH")) {
+                HttpPatch httpPatch = new HttpPatch(uri);
+                httpPatch.setHeader("Accept", acceptType);
+                addHeaders(reqHeaders, httpPatch);
+                httpPatch.setEntity(new StringEntity(body));
+                return httpPatch;
+            }
+
+            if (requestMethod.equals("DELETE")) {
+                HttpDelete httpDelete = new HttpDelete(uri);
+                addHeaders(reqHeaders, httpDelete);
+                httpDelete.setHeader("Accept", acceptType);
+                return httpDelete;
+            }
+
+            if (requestMethod.equals("PUT")) {
+                HttpPut httpPut = new HttpPut(uri);
+                httpPut.setHeader("Accept", acceptType);
+                addHeaders(reqHeaders, httpPut);
+                httpPut.setEntity(new StringEntity(body));
+                return httpPut;
+            }
+
+            if (requestMethod.equals("HEAD")) {
+                HttpHead httpHead = new HttpHead(uri);
+                addHeaders(reqHeaders, httpHead);
+                return httpHead;
+            }
+
+            if (requestMethod.equals("TRACE")) {
+                HttpTrace httpTrace = new HttpTrace(uri);
+                addHeaders(reqHeaders, httpTrace);
+                return httpTrace;
+            }
+
+            if (requestMethod.equals("OPTIONS")) {
+                HttpOptions httpOptions = new HttpOptions(uri);
+                addHeaders(reqHeaders, httpOptions);
+                return httpOptions;
+            }
+
+            if (requestMethod.equals("LOCK")) {
+                HttpLock httpLock = new HttpLock(uri);
+                addHeaders(reqHeaders, httpLock);
+                return httpLock;
+            }
+
+            throw new IllegalArgumentException("Unknown method " + requestMethod);
+
         } catch (UnsupportedEncodingException e) {
             throw new RuntimeException(e);
         }
+    }
 
+    private void addHeaders(Map<String, String> reqHeaders, HttpRequest req) {
+        if (reqHeaders != null) {
+            for (Map.Entry<String, String> header : reqHeaders.entrySet()) {
+                req.addHeader(header.getKey(), header.getValue());
+            }
+        }
     }
 
     public int getPort() {
@@ -126,7 +235,7 @@ public class SparkTestUtil {
      * So these can be used to specify other key/trust stores if required.
      *
      * @return an SSL Socket Factory using either provided keystore OR the
-     *         keystore specified in JVM params
+     * keystore specified in JVM params
      */
     private SSLSocketFactory getSslFactory() {
         KeyStore keyStore = null;
@@ -136,8 +245,7 @@ public class SparkTestUtil {
             keyStore.load(fis, getTrustStorePassword().toCharArray());
             fis.close();
 
-            TrustManagerFactory tmf = TrustManagerFactory
-                    .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
             tmf.init(keyStore);
             SSLContext ctx = SSLContext.getInstance("TLS");
             ctx.init(null, tmf.getTrustManagers(), null);
@@ -187,8 +295,7 @@ public class SparkTestUtil {
      * @return truststore password as string
      */
     public static String getTrustStorePassword() {
-        String password = System
-                .getProperty("javax.net.ssl.trustStorePassword");
+        String password = System.getProperty("javax.net.ssl.trustStorePassword");
         return password == null ? getKeystorePassword() : password;
     }
 
@@ -203,6 +310,20 @@ public class SparkTestUtil {
         try {
             Thread.sleep(time);
         } catch (Exception e) {
+        }
+    }
+
+    static class HttpLock extends HttpRequestBase {
+        public final static String METHOD_NAME = "LOCK";
+
+        public HttpLock(final String uri) {
+            super();
+            setURI(URI.create(uri));
+        }
+
+        @Override
+        public String getMethod() {
+            return METHOD_NAME;
         }
     }
 

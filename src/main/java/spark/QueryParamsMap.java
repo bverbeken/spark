@@ -13,49 +13,47 @@ import javax.servlet.http.HttpServletRequest;
  * Parses parameters keys like in Sinatra. <br>
  * <br>
  * For a querystring like: <br>
- * <code>
- * user[name]=federico&user[lastname]=dayan
- * </code> <br>
+ * user[name]=federico&#38;user[lastname]=dayan
+ * <br>
  * <br>
  * We get would get a structure like: <br>
- * <code>
- *  user : {name: federico, lastname: dayan}
- * </code>
- * 
+ * user : {name: federico, lastname: dayan}
  * <br>
  * <br>
  * That is:<br>
- * <code>
- *  queryParamsMapInstance.get("user).get("name").value(); <br>
- *  queryParamsMapInstance.get("user).get("lastname").value();
- * <code>
- * 
+ * queryParamsMapInstance.get("user").get("name").value(); <br>
+ * queryParamsMapInstance.get("user").get("lastname").value();
  * <br><br>
- * 
- * It is null safe, meaning that if a key does not exist, it does not throw <code>NullPointerExcetpion</code>
- * , it just returns <code>null</code>.
- * 
+ * It is null safe, meaning that if a key does not exist, it does not throw NullPointerException
+ * , it just returns null.
+ *
  * @author fddayan
- * 
  */
 public class QueryParamsMap {
 
     private static final QueryParamsMap NULL = new NullQueryParamsMap();
 
-    /** Holds the nested keys */
-    private Map<String, QueryParamsMap> queryMap = new HashMap<String, QueryParamsMap>();
+    /**
+     * Pattern for parsing the key of querystring
+     */
+    private static final Pattern KEY_PATTERN = Pattern.compile("\\A[\\[\\]]*([^\\[\\]]+)\\]*");
 
-    /** Value(s) for this key */
+    /**
+     * Holds the nested keys
+     */
+    private Map<String, QueryParamsMap> queryMap = new HashMap<>();
+
+    /**
+     * Value(s) for this key
+     */
     private String[] values;
-
-    private Pattern p = Pattern.compile("\\A[\\[\\]]*([^\\[\\]]+)\\]*");
 
     /**
      * Creates a new QueryParamsMap from and HttpServletRequest. <br>
      * Parses the parameters from request.getParameterMap() <br>
      * No need to decode, since HttpServletRequest does it for us.
-     * 
-     * @param request
+     *
+     * @param request the servlet request
      */
     public QueryParamsMap(HttpServletRequest request) {
         if (request == null) {
@@ -68,32 +66,46 @@ public class QueryParamsMap {
     protected QueryParamsMap() {
     }
 
-    
+
     /**
      * Parses the key and creates the child QueryParamMaps
-     * 
      * user[info][name] creates 3 nested QueryParamMaps. For user, info and
      * name.
-     * 
-     * @param key
-     *            The key in the formar fo key1[key2][key3] (for example:
-     *            user[info][name]).
-     * @param values
+     *
+     * @param key    The key in the formar fo key1[key2][key3] (for example:
+     *               user[info][name]).
+     * @param values the values
      */
     protected QueryParamsMap(String key, String... values) {
         loadKeys(key, values);
     }
 
+    /**
+     * Constructor
+     *
+     * @param params the parameters
+     */
     protected QueryParamsMap(Map<String, String[]> params) {
         loadQueryString(params);
     }
 
+    /**
+     * loads query string
+     *
+     * @param params the parameters
+     */
     protected final void loadQueryString(Map<String, String[]> params) {
         for (Map.Entry<String, String[]> param : params.entrySet()) {
             loadKeys(param.getKey(), param.getValue());
         }
     }
 
+    /**
+     * loads keys
+     *
+     * @param key   the key
+     * @param value the values
+     */
     protected final void loadKeys(String key, String[] value) {
         String[] parsed = parseKey(key);
 
@@ -112,10 +124,10 @@ public class QueryParamsMap {
     }
 
     protected final String[] parseKey(String key) {
-        Matcher m = p.matcher(key);
+        Matcher m = KEY_PATTERN.matcher(key);
 
         if (m.find()) {
-            return new String[] { cleanKey(m.group()), key.substring(m.end()) };
+            return new String[] {cleanKey(m.group()), key.substring(m.end())};
         } else {
             return null; // NOSONAR
         }
@@ -130,10 +142,9 @@ public class QueryParamsMap {
     }
 
     /**
-     * Retruns and element fro the specified key. <br>
+     * Returns an element from the specified key. <br>
      * For querystring: <br>
      * <br>
-     * <code>
      * user[name]=fede
      * <br>
      * <br>
@@ -142,12 +153,9 @@ public class QueryParamsMap {
      * or
      * <br>
      * get("user","name").value() #  fede
-     * 
-     * </code>
-     * 
-     * @param key
-     *            The paramater nested key
-     * @return
+     *
+     * @param keys The parameter nested key(s)
+     * @return the query params map
      */
     public QueryParamsMap get(String... keys) {
         QueryParamsMap ret = this;
@@ -164,8 +172,8 @@ public class QueryParamsMap {
     /**
      * Returns the value for this key. <br>
      * If this key has nested elements and does not have a value returns null.
-     * 
-     * @return
+     *
+     * @return the value
      */
     public String value() {
         if (hasValue()) {
@@ -177,60 +185,90 @@ public class QueryParamsMap {
 
     /**
      * Returns the value for that key. <br>
-     * 
      * It is a shortcut for: <br>
      * <br>
      * <code>
      * get("user").get("name").value()
      * get("user").value("name")
      * </code>
-     * 
-     * @param key
-     * @return
+     *
+     * @param keys the key(s)
+     * @return the value
      */
     public String value(String... keys) {
         return get(keys).value();
     }
 
+    /**
+     * @return has keys
+     */
     public boolean hasKeys() {
         return !this.queryMap.isEmpty();
     }
 
+    /**
+     * @return true if the map contains the given key
+     */
+    public boolean hasKey(String key) {
+    	return this.queryMap.containsKey( key );
+    }
+
+    /**
+     * @return has values
+     */
     public boolean hasValue() {
         return this.values != null && this.values.length > 0;
     }
 
+    /**
+     * @return the boolean value
+     */
     public Boolean booleanValue() {
         return hasValue() ? Boolean.valueOf(value()) : null;
     }
 
+    /**
+     * @return the integer value
+     */
     public Integer integerValue() {
         return hasValue() ? Integer.valueOf(value()) : null;
     }
 
+    /**
+     * @return the long value
+     */
     public Long longValue() {
         return hasValue() ? Long.valueOf(value()) : null;
     }
 
+    /**
+     * @return the float value
+     */
     public Float floatValue() {
         return hasValue() ? Float.valueOf(value()) : null;
     }
 
+    /**
+     * @return the double value
+     */
     public Double doubleValue() {
         return hasValue() ? Double.valueOf(value()) : null;
     }
 
+    /**
+     * @return the values
+     */
     public String[] values() {
         return this.values.clone();
     }
-    
+
     /**
      * @return the queryMap
      */
     Map<String, QueryParamsMap> getQueryMap() {
         return queryMap;
     }
-    
+
     /**
      * @return the values
      */
@@ -239,15 +277,17 @@ public class QueryParamsMap {
     }
 
 
-
     private static class NullQueryParamsMap extends QueryParamsMap {
         public NullQueryParamsMap() {
             super();
         }
     }
 
+    /**
+     * @return Map representation
+     */
     public Map<String, String[]> toMap() {
-        Map<String, String[]> map = new HashMap<String, String[]>();
+        Map<String, String[]> map = new HashMap<>();
 
         for (Entry<String, QueryParamsMap> key : this.queryMap.entrySet()) {
             map.put(key.getKey(), key.getValue().values);

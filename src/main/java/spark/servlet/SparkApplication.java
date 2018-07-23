@@ -22,9 +22,14 @@ package spark.servlet;
  * @author Per Wendel
  */
 public interface SparkApplication {
-    
+
     /**
      * Invoked from the SparkFilter. Add routes here.
      */
     void init();
+
+    /**
+     * Invoked from the SparkFilter.
+     */
+    default void destroy() {}
 }

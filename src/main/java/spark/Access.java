@@ -16,16 +16,19 @@
  */
 package spark;
 
+import spark.routematch.RouteMatch;
+
+/**
+ * Provides access to package protected methods. JUST FOR INTERNAL USE. NOT PART OF PUBLIC SPARK API.
+ */
 public final class Access {
 
-    private Access() {}
-    
-    public static String getBody(Response response) {
-        return response.body();
+    private Access() {
+        // hidden
     }
 
-    public static void runFromServlet() {
-        Spark.runFromServlet();
+    public static void changeMatch(Request request, RouteMatch match) {
+        request.changeMatch(match);
     }
 
 }
